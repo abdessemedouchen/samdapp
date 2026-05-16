@@ -8,11 +8,17 @@ on:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
 
     steps:
     - name: Checkout Source Code
       uses: actions/checkout@v4
+
+    - name: Set up JDK 17
+      uses: actions/setup-java@v4
+      with:
+        java-version: '17'
+        distribution: 'temurin'
 
     - name: Set up Node.js
       uses: actions/setup-node@v4
@@ -20,25 +26,33 @@ jobs:
         node-version: '20'
 
     - name: Install Cordova
-      run: npm install -g cordova
+      run: npm install -g cordova@12
+
+    - name: Setup Android SDK
+      uses: android-actions/setup-android@v3
+
+    - name: Install Android Build Tools
+      run: |
+        sdkmanager --install "build-tools;34.0.0" "platforms;android-34" "platform-tools"
+        yes | sdkmanager --licenses
 
     - name: Create Cordova Project
       run: |
         cordova create myapp com.samd.studio "SAMD Studio"
         cd myapp
-        cordova platform add android
+        cordova platform add android@13.0.0
 
-    - name: Copy Web Files into App
+    - name: Copy Web Files
       run: |
         rm -rf myapp/www/*
         rsync -av --exclude='myapp' --exclude='.github' --exclude='.git' ./ myapp/www/
 
-    - name: Configure App Settings
+    - name: Configure config.xml
       run: |
         cd myapp
-        sed -i 's|</widget>|    <preference name="SplashScreenDelay" value="0" />\n    <preference name="AllowInlineMediaPlayback" value="true" />\n    <allow-navigation href="*" />\n</widget>|g' config.xml
+        sed -i 's|</widget>|    <preference name="android-minSdkVersion" value="24" />\n    <preference name="android-targetSdkVersion" value="34" />\n    <preference name="SplashScreenDelay" value="0" />\n    <preference name="AllowInlineMediaPlayback" value="true" />\n    <allow-navigation href="*" />\n</widget>|' config.xml
         if [ -f "../icon.jpg" ]; then
-          sed -i 's|</widget>|    <icon src="../icon.jpg" />\n</widget>|g' config.xml
+          sed -i 's|</widget>|    <icon src="../icon.jpg" />\n</widget>|' config.xml
         fi
 
     - name: Install Cordova Plugins
@@ -47,25 +61,20 @@ jobs:
         cordova plugin add cordova-plugin-whitelist || true
         cordova plugin add cordova-plugin-splashscreen || true
 
-    - name: Set up JDK 17
-      uses: actions/setup-java@v4
-      with:
-        java-version: '17'
-        distribution: 'temurin'
+    - name: Set ANDROID_HOME and JAVA_HOME
+      run: |
+        echo "ANDROID_HOME=$ANDROID_HOME" >> $GITHUB_ENV
+        echo "JAVA_HOME=$JAVA_HOME" >> $GITHUB_ENV
 
-    - name: Set up Android SDK
-      uses: android-actions/setup-android@v3
-
-    - name: Accept Android Licenses
-      run: yes | sdkmanager --licenses || true
-
-    - name: Build Android APK
+    - name: Build APK
       run: |
         cd myapp
-        cordova build android --debug
+        export GRADLE_OPTS="-Xmx2048m -XX:MaxMetaspaceSize=512m"
+        cordova build android --debug -- --gradleArg=--no-daemon
 
     - name: Upload APK
       uses: actions/upload-artifact@v4
       with:
         name: SAMD-Studio-APK
         path: myapp/platforms/android/app/build/outputs/apk/debug/app-debug.apk
+        if-no-files-found: error
